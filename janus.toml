@@ -1,11 +1,23 @@
 # Janus configuration. Env vars (JANUS_*) override these.
 
 # --- Model ---
+# provider: "ollama"    - a local Ollama server (any model you've pulled)
+#           "openai"    - any OpenAI-compatible API: OpenAI, OpenRouter, Groq, Together,
+#                         Mistral, DeepSeek, Gemini, LM Studio, vLLM, llama.cpp server, ...
+#           "anthropic" - Anthropic's API (Claude models)
+# For openai/anthropic, put the key in JANUS_API_KEY (or OPENAI_API_KEY /
+# ANTHROPIC_API_KEY), not in this file. Examples are in the README.
+provider = "ollama"
 model = "hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M"
 ollama_host = "http://localhost:11434"
+# Endpoint for openai/anthropic; "" = the provider's official API.
+api_base = ""
 temperature = 0.7
 # Max tokens the model may generate per call (0 = model default).
 num_predict = 0
+# Ollama context window. Ollama's default is small enough to silently cut off the
+# agent's history; raise it if your model and RAM allow (0 = Ollama default).
+num_ctx = 8192
 
 # --- Workspace ---
 # Default root for file operations. Paths outside this are "risky" and gated.

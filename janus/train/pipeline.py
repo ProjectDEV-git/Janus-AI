@@ -34,6 +34,13 @@ def run_training_cycle(settings, memory, *, adopt: bool = False, console=None) -
         if console is not None:
             console.print(msg)
 
+    if settings.provider != "ollama":
+        return TrainOutcome(
+            "skipped",
+            f"self-training builds local models that run in Ollama, but provider is "
+            f"'{settings.provider}'. Set provider = \"ollama\" to train and A/B them, or run "
+            f"`janus dataset` to export the training data from your runs.")
+
     # 1. Mine the dataset from winning runs.
     stats = build_dataset(memory, settings)
     say(f"[cyan]dataset[/]: {stats.examples} examples from {stats.runs_used} runs "

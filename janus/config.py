@@ -16,10 +16,14 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="JANUS_", extra="ignore")
 
     # Model
+    provider: str = "ollama"         # ollama | openai (any OpenAI-compatible API) | anthropic
     model: str = "hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M"
     ollama_host: str = "http://localhost:11434"
+    api_base: str = ""               # openai/anthropic endpoint; "" = the provider's official API
+    api_key: str = ""                # prefer JANUS_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY
     temperature: float = 0.7
     num_predict: int = 0
+    num_ctx: int = 8192              # Ollama context window (0 = Ollama's default, often too small)
     seed: int | None = None          # fixed sampling seed (None = random)
 
     # Workspace

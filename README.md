@@ -1,9 +1,11 @@
 # Janus AI
 
-A **local, autonomous, self-improving agent**. Give it a goal; it plans, acts,
-checks its own progress against evidence, and keeps going until the goal is
-*verified done* or you stop it. Janus runs entirely on a local model through
-[Ollama](https://ollama.com) — no cloud API required.
+An **autonomous, self-improving agent** that works with any model. Give it a goal;
+it plans, acts, checks its own progress against evidence, and keeps going until
+the goal is *verified done* or you stop it. By default Janus runs entirely on a
+local model through [Ollama](https://ollama.com) — no cloud API required — but it
+can equally drive any OpenAI-compatible API or Anthropic's Claude
+([Choosing a model](#choosing-a-model)).
 
 Janus can improve itself across four layers: its prompts and memory, tools it
 writes for itself, patches to its own source code, and training **its own model**
@@ -45,7 +47,7 @@ distro's equivalent) to avoid that.
 ## Install
 
 ```bash
-# 1. Install Ollama and pull the model
+# 1. Install Ollama and pull the model (skip if you use a hosted model, see below)
 ollama pull hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M
 
 # 2. Install Janus
@@ -54,6 +56,38 @@ pip install -e ".[dev]"
 # 3. Check connectivity + config
 janus config
 ```
+
+## Choosing a model
+
+Janus speaks three protocols, which between them cover practically every model.
+Set `provider` and `model` in `janus.toml` (or `JANUS_PROVIDER` / `JANUS_MODEL`),
+and put API keys in the environment, not the file:
+
+| Where the model runs | `provider` | `model` example | `api_base` | Key |
+|---|---|---|---|---|
+| Ollama (local, default) | `ollama` | any pulled tag, e.g. `qwen3:8b`, `llama3.1` | — (`ollama_host`) | — |
+| OpenAI | `openai` | `gpt-4.1-mini` | — | `OPENAI_API_KEY` |
+| Anthropic | `anthropic` | any Claude model id | — | `ANTHROPIC_API_KEY` |
+| OpenRouter | `openai` | `meta-llama/llama-3.3-70b-instruct` | `https://openrouter.ai/api/v1` | `JANUS_API_KEY` |
+| Groq | `openai` | `llama-3.3-70b-versatile` | `https://api.groq.com/openai/v1` | `JANUS_API_KEY` |
+| Google Gemini | `openai` | `gemini-2.5-flash` | `https://generativelanguage.googleapis.com/v1beta/openai` | `JANUS_API_KEY` |
+| Mistral | `openai` | `mistral-large-latest` | `https://api.mistral.ai/v1` | `JANUS_API_KEY` |
+| DeepSeek | `openai` | `deepseek-chat` | `https://api.deepseek.com/v1` | `JANUS_API_KEY` |
+| LM Studio / vLLM / llama.cpp server | `openai` | whatever the server loaded | e.g. `http://localhost:1234/v1` | usually none |
+
+`JANUS_API_KEY` works for every provider; `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
+are used when it isn't set. Run `janus config` to check the connection.
+
+Models differ in the options they accept. When a server rejects an optional
+parameter (JSON mode, `temperature`, `seed`, `max_tokens`), Janus drops it and
+retries, and remembers that for the rest of the run. It also copes with replies
+wrapped in prose, code fences, or `<think>` blocks from reasoning models.
+For Ollama, `num_ctx` (default 8192) sets the context window; Ollama's own default
+is small enough to cut off the agent's history.
+
+Self-training (below) produces local models served by Ollama, so `janus train`
+needs `provider = "ollama"`. With a hosted provider, `janus dataset` still exports
+your winning runs as training data.
 
 ## Usage
 

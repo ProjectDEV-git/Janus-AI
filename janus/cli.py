@@ -16,7 +16,7 @@ from janus.llm import LLM
 from janus.memory import Memory
 from janus.tools import build_registry
 
-app = typer.Typer(add_completion=False, help="Janus — a local, self-improving agent.")
+app = typer.Typer(add_completion=False, help="Janus — an autonomous, self-improving agent.")
 console = Console()
 
 
@@ -37,7 +37,11 @@ def _build(trust: bool | None = None, interactive: bool = True):
 
 
 def _active_model(s) -> str:
-    """Prefer the adopted model from the lineage registry over the config default."""
+    """Prefer the adopted model from the lineage registry over the config default.
+
+    Trained versions are local Ollama models, so the lineage only applies there."""
+    if s.provider != "ollama":
+        return s.model
     try:
         from janus.train.registry import ModelRegistry
         reg = ModelRegistry(s.db_path)
@@ -71,13 +75,16 @@ def _reporter() -> Reporter:
 
 @app.command()
 def config():
-    """Show settings and check Ollama connectivity."""
+    """Show settings and check model connectivity."""
     s = load_settings()
     t = Table(title="Janus config")
     t.add_column("key"); t.add_column("value")
-    for k in ("model", "ollama_host", "workspace_abs", "max_iterations",
+    endpoint = "ollama_host" if s.provider == "ollama" else "api_base"
+    for k in ("provider", "model", endpoint, "workspace_abs", "sandbox", "max_iterations",
               "max_seconds", "max_tokens", "auto_approve_safe", "trust"):
-        t.add_row(k, str(getattr(s, k)))
+        t.add_row(k, str(getattr(s, k)) or "(default)")
+    if s.provider != "ollama":
+        t.add_row("api_key", "set" if LLM(s)._api_key() else "[red]missing[/]")
     console.print(t)
     ok, msg = LLM(s).ping()
     console.print(f"[{'green' if ok else 'red'}]connectivity:[/] {msg}")
