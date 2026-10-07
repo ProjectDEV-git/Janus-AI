@@ -21,3 +21,19 @@ max_tokens = 200000
 auto_approve_safe = true
 # trust: when true, risky actions also run without a prompt (kill switch + audit log stay on).
 trust = false
+
+# --- Self-training (LoRA on the base Gemma weights; needs a GPU to train) ---
+# IMPORTANT: this is the full-precision source to TRAIN from. The IQ3_M GGUF you
+# run for inference cannot be trained; set this to the matching base weights.
+base_model_id = "google/gemma-3n-E2B"
+model_prefix = "janus"          # produced Ollama tags: janus:v1, janus:v2, ...
+gguf_quant = "Q4_K_M"           # quantization for the produced GGUF
+train_min_examples = 20         # refuse to train on fewer winning transcripts than this
+train_epochs = 1
+train_lr = 2e-4
+train_batch_size = 1
+train_grad_accum = 8
+lora_r = 16
+lora_alpha = 32
+lora_dropout = 0.05
+llama_cpp_dir = ""              # path to a built llama.cpp (for GGUF convert); "" = autodetect

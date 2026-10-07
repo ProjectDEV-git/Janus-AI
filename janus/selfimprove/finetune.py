@@ -1,31 +1,24 @@
-"""Layer 4 — optional LoRA fine-tuning (no-ops gracefully without a GPU).
+"""Layer 4 — self-training (LoRA) hook inside the improvement cycle.
 
-Collects successful run transcripts into a small SFT dataset and, if a GPU and
-the `finetune` extra are installed, trains a LoRA adapter and A/B-tests it
-against the base model on the benchmark, adopting it only on a win. Without the
-dependencies or a GPU it reports that it is unavailable and makes no change.
+The heavy training/export work lives in janus.train.pipeline and is driven by
+`janus train` (or `janus improve --train`). As a Strategy this only reports
+readiness, since training is not a small reversible micro-change like the other
+layers — it produces a whole new model version with its own A/B gate.
 """
 from __future__ import annotations
 
 from janus.selfimprove.base import AppliedChange, ImproveContext
-
-
-def _gpu_available() -> bool:
-    try:
-        import torch  # type: ignore
-        return bool(torch.cuda.is_available())
-    except Exception:  # noqa: BLE001
-        return False
+from janus.train import trainer as trainer_mod
 
 
 class FineTuneStrategy:
     name = "finetune"
 
     def propose(self, ctx: ImproveContext) -> AppliedChange | None:
-        if not _gpu_available():
-            ctx.say("[dim]finetune: no GPU / torch not installed; skipping (install .[finetune])[/]")
-            return None
-        # Dataset assembly + LoRA training would go here; intentionally not run
-        # automatically without an explicit, resourced opt-in.
-        ctx.say("[dim]finetune: GPU present but auto-training is opt-in; skipping[/]")
+        ok, msg = trainer_mod.preflight()
+        if ok:
+            ctx.say("[dim]finetune: trainer ready — run `janus train` to build a new model "
+                    "version (gated on an A/B benchmark).[/]")
+        else:
+            ctx.say(f"[dim]finetune: {msg}[/]")
         return None

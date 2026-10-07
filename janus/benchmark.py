@@ -142,15 +142,19 @@ def run_benchmark(trust: bool = True, console=None, settings: Settings | None = 
     return card
 
 
-def measure_subprocess(trust: bool = True) -> Scorecard:
+def measure_subprocess(trust: bool = True, model: str | None = None) -> Scorecard:
     """Run the benchmark in a fresh subprocess and parse its JSON scorecard.
 
     Used by self-improvement so a change to Janus's own source/tools/memory is
-    measured against freshly-imported code, not the already-loaded modules.
+    measured against freshly-imported code, not the already-loaded modules. Pass
+    `model` to A/B a specific Ollama tag (e.g. a newly trained janus:vN).
     """
+    env = dict(os.environ)
+    if model:
+        env["JANUS_MODEL"] = model
     proc = subprocess.run(
         [sys.executable, "-m", "janus.benchmark", "--json", ("--trust" if trust else "--no-trust")],
-        capture_output=True, text=True, timeout=60 * 60,
+        capture_output=True, text=True, timeout=60 * 60, env=env,
     )
     line = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else "{}"
     data = json.loads(line)

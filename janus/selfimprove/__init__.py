@@ -21,7 +21,8 @@ from janus.selfimprove.tool_writer import ToolWriterStrategy
 __all__ = ["run_improve"]
 
 
-def run_improve(rounds: int = 1, trust: bool = False, console=None) -> None:
+def run_improve(rounds: int = 1, trust: bool = False, train: bool = False,
+                adopt: bool = False, console=None) -> None:
     s = load_settings()
     s.trust = trust
     s.workspace_abs.mkdir(parents=True, exist_ok=True)
@@ -81,5 +82,18 @@ def run_improve(rounds: int = 1, trust: bool = False, console=None) -> None:
                 change.revert()
                 if console:
                     console.print(f"[red]REVERT[/] {strat.name}: {why}")
+
+    if train:
+        if console:
+            console.print("\n[bold]=== Self-training ===[/]")
+        from janus.train.pipeline import run_training_cycle
+        # Adopting a new model is a risky action; gate it unless trusting.
+        do_adopt = adopt
+        if adopt and not trust and gate.prompter is not None:
+            do_adopt = gate.prompter("adopt_model", {"adopt": True},
+                                     "adopt a newly trained model as the active model")
+        outcome = run_training_cycle(s, mem, adopt=do_adopt, console=console)
+        if console:
+            console.print(f"[bold]train:[/] {outcome.status} — {outcome.detail}")
 
     mem.close()

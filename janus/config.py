@@ -33,6 +33,20 @@ class Settings(BaseSettings):
     auto_approve_safe: bool = True
     trust: bool = False
 
+    # Self-training (LoRA on the base Gemma weights)
+    base_model_id: str = "google/gemma-3n-E2B"   # full-precision source for training
+    model_prefix: str = "janus"                   # produced Ollama tags: janus:v1, v2, ...
+    gguf_quant: str = "Q4_K_M"                     # quant for the produced GGUF
+    train_min_examples: int = 20                  # refuse to train below this
+    train_epochs: int = 1
+    train_lr: float = 2e-4
+    train_batch_size: int = 1
+    train_grad_accum: int = 8
+    lora_r: int = 16
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
+    llama_cpp_dir: str = ""                        # path to llama.cpp (for GGUF convert); "" = autodetect
+
     # --- Derived paths (not read from config) ---
     @property
     def root(self) -> Path:
@@ -55,6 +69,14 @@ class Settings(BaseSettings):
     @property
     def transcripts_dir(self) -> Path:
         return self.root / "transcripts"
+
+    @property
+    def adapters_dir(self) -> Path:
+        return self.root / "adapters"
+
+    @property
+    def datasets_dir(self) -> Path:
+        return self.root / "datasets"
 
 
 def _find_config_dir(start: Path | None = None) -> Path:

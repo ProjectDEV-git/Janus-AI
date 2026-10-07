@@ -24,6 +24,7 @@ def _build(trust: bool | None = None, interactive: bool = True):
     s = load_settings()
     if trust is not None:
         s.trust = trust
+    s.model = _active_model(s)
     s.workspace_abs.mkdir(parents=True, exist_ok=True)
     s.transcripts_dir.mkdir(parents=True, exist_ok=True)
     llm = LLM(s)
@@ -33,6 +34,18 @@ def _build(trust: bool | None = None, interactive: bool = True):
     gate = ApprovalGate(s, prompter=prompter)
     stop = StopController(stopfile=s.stopfile)
     return s, llm, reg, mem, gate, stop
+
+
+def _active_model(s) -> str:
+    """Prefer the adopted model from the lineage registry over the config default."""
+    try:
+        from janus.train.registry import ModelRegistry
+        reg = ModelRegistry(s.db_path)
+        tag = reg.current_tag(default=s.model)
+        reg.close()
+        return tag
+    except Exception:  # noqa: BLE001
+        return s.model
 
 
 def _make_prompter():
@@ -143,10 +156,72 @@ def bench(trust: bool = typer.Option(True, "--trust/--no-trust",
 def improve(
     rounds: int = typer.Option(1, help="How many improvement rounds to attempt."),
     trust: bool = typer.Option(False, "--trust", help="Auto-approve risky self-edits."),
+    train: bool = typer.Option(False, "--train", help="Also run a self-training cycle at the end."),
+    adopt: bool = typer.Option(False, "--adopt", help="Adopt a winning trained model automatically."),
 ):
-    """Run the self-improvement cycle against the benchmark."""
+    """Run the self-improvement cycle (prompts/tools/code), optionally self-training too."""
     from janus.selfimprove import run_improve
-    run_improve(rounds=rounds, trust=trust, console=console)
+    run_improve(rounds=rounds, trust=trust, train=train, adopt=adopt, console=console)
+
+
+@app.command()
+def train(
+    adopt: bool = typer.Option(False, "--adopt", help="Adopt the new model if it wins the A/B."),
+):
+    """Train a new Janus model version (LoRA on the base weights) from winning runs."""
+    from janus.config import load_settings
+    from janus.memory import Memory
+    from janus.train.pipeline import run_training_cycle
+
+    s = load_settings()
+    s.model = _active_model(s)
+    ok, msg = LLM(s).ping()
+    if not ok:
+        console.print(f"[yellow]note:[/] {msg} (A/B benchmarking needs the model running)")
+    mem = Memory(s.db_path)
+    outcome = run_training_cycle(s, mem, adopt=adopt, console=console)
+    mem.close()
+    color = {"adopted": "green", "built_not_adopted": "cyan",
+             "dataset_only": "yellow", "skipped": "yellow", "error": "red"}.get(outcome.status, "white")
+    console.print(Panel(f"status: [bold]{outcome.status}[/]\n{outcome.detail}",
+                        title=f"train {outcome.tag or ''}", border_style=color))
+
+
+model_app = typer.Typer(help="Inspect and switch Janus model versions.")
+app.add_typer(model_app, name="model")
+
+
+@model_app.command("list")
+def model_list():
+    """List the Janus model lineage."""
+    from janus.train.registry import ModelRegistry
+    s = load_settings()
+    reg = ModelRegistry(s.db_path)
+    rows = reg.list()
+    if not rows:
+        console.print(f"No trained versions yet. Active model: [bold]{_active_model(s)}[/]")
+        reg.close()
+        return
+    t = Table(title="Janus model lineage")
+    for c in ("version", "tag", "parent", "status", "adopted", "success"):
+        t.add_column(c)
+    for r in rows:
+        sr = f"{r.scorecard['success_rate']:.0%}" if r.scorecard else "-"
+        t.add_row(str(r.version), r.tag, r.parent_tag or "(base)", r.status,
+                  "yes" if r.adopted else "", sr)
+    console.print(t)
+    reg.close()
+
+
+@model_app.command("use")
+def model_use(tag: str = typer.Argument(..., help="Model tag to adopt, e.g. janus:v2.")):
+    """Adopt a specific model version as the active model."""
+    from janus.train.registry import ModelRegistry
+    s = load_settings()
+    reg = ModelRegistry(s.db_path)
+    reg.adopt(tag)
+    reg.close()
+    console.print(f"[green]Active model set to[/] {tag}")
 
 
 if __name__ == "__main__":
