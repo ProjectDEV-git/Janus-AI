@@ -143,6 +143,8 @@ class Agent:
                                                 "Re-emit exactly one JSON object."})
                     continue
 
+                # Keep the model's own turn in the history so it can see what it already did.
+                messages.append({"role": "assistant", "content": json.dumps(step)})
                 thought = str(step.get("thought", ""))
                 self.report.on_thought(i, thought)
                 self.mem.log_event(run_id, "thought", {"iter": i, "text": thought})
@@ -194,7 +196,6 @@ class Agent:
     def _observe(self, run_id: int, messages: list[dict], i: int, ok: bool, output: str) -> None:
         self.report.on_observation(i, ok, output)
         self.mem.log_event(run_id, "observation", {"iter": i, "ok": ok, "output": output})
-        messages.append({"role": "assistant", "content": json.dumps({"_prev_iter": i})})
         messages.append({"role": "user",
                          "content": f"OBSERVATION (ok={ok}):\n{output}\n\nEmit your next JSON object."})
 

@@ -15,9 +15,11 @@ class FakeLLM:
         self._script = list(script)
         self.tokens_used = 0
         self.calls = 0
+        self.seen: list[list[dict]] = []  # the messages passed on each call
 
     def chat_json(self, messages, *, retries: int = 2) -> dict:
         self.calls += 1
+        self.seen.append([dict(m) for m in messages])
         self.tokens_used += 10
         if self._script:
             return self._script.pop(0)
@@ -39,6 +41,7 @@ def settings(tmp_path: Path) -> Settings:
         max_tokens=200_000,
         auto_approve_safe=True,
         trust=False,
+        sandbox="off",  # tests opt in to the sandbox explicitly (see test_sandbox.py)
     )
     return s
 

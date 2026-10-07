@@ -1,26 +1,22 @@
 """Built-in tools: files, shell, python, and web access.
 
-Risk assessment pattern: file writes and shell/python are escalated to RISKY
-when they touch paths outside the workspace or contain destructive commands,
-so the approval gate can prompt. Reads and in-workspace writes stay SAFE.
+Risk assessment: file tools are SAFE inside the workspace and RISKY outside it
+(reads included, so nothing outside the workspace can be read and then sent out
+via web_fetch without approval). Shell and Python can do anything, which no
+inspection of the code can rule out, so they are SAFE only when they run inside
+the OS sandbox (see janus.sandbox) and RISKY otherwise.
 """
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from janus import sandbox
 from janus.tools.base import Risk, Tool, ToolResult
 
-# Shell command fragments we always treat as risky regardless of path.
-_DANGER_RE = re.compile(
-    r"(\brm\b|\bsudo\b|\bmkfs\b|\bdd\b|\bshutdown\b|\breboot\b|\bkill(all)?\b|"
-    r"\bchmod\b|\bchown\b|\bmv\b|>\s*/|\bcurl\b|\bwget\b|\bgit\s+push\b|\bpip\s+install\b|"
-    r"\bapt\b|\bbrew\b|\bnpm\b)"
-)
 _MAX_OUTPUT = 8000
 
 
@@ -73,11 +69,31 @@ def _write_file(a: WriteFileArgs, *, settings) -> ToolResult:
         return ToolResult(False, f"write error: {e}")
 
 
-def _assess_write(args: dict, settings):
-    p = Path(args.get("path", ""))
-    if _within_workspace(p, settings):
-        return Risk.SAFE, ""
-    return Risk.RISKY, f"writes outside workspace: {p}"
+def _assess_path(verb: str, default: str = ""):
+    def assess(args: dict, settings):
+        p = Path(args.get("path", default))
+        if _within_workspace(p, settings):
+            return Risk.SAFE, ""
+        return Risk.RISKY, f"{verb} outside workspace: {p}"
+    return assess
+
+
+def _assess_exec(args: dict, settings):
+    if sandbox.enabled(settings):
+        return Risk.SAFE, "runs in sandbox"
+    return Risk.RISKY, "runs code without a sandbox (install bubblewrap to sandbox it)"
+
+
+def _exec(cmd: list[str], settings, timeout: int, label: str) -> ToolResult:
+    try:
+        proc = sandbox.run(cmd, settings=settings, writable=settings.workspace_abs,
+                           timeout=timeout)
+        out = f"exit={proc.returncode}\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
+        return ToolResult(proc.returncode == 0, _clip(out), {"returncode": proc.returncode})
+    except subprocess.TimeoutExpired:
+        return ToolResult(False, f"{label} timed out after {timeout}s")
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(False, f"{label} error: {e}")
 
 
 # --- list_dir ---
@@ -102,24 +118,7 @@ class RunShellArgs(BaseModel):
 
 
 def _run_shell(a: RunShellArgs, *, settings) -> ToolResult:
-    try:
-        proc = subprocess.run(
-            a.command, shell=True, cwd=str(settings.workspace_abs),
-            capture_output=True, text=True, timeout=a.timeout,
-        )
-        out = f"exit={proc.returncode}\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
-        return ToolResult(proc.returncode == 0, _clip(out), {"returncode": proc.returncode})
-    except subprocess.TimeoutExpired:
-        return ToolResult(False, f"command timed out after {a.timeout}s")
-    except Exception as e:  # noqa: BLE001
-        return ToolResult(False, f"shell error: {e}")
-
-
-def _assess_shell(args: dict, settings):
-    cmd = args.get("command", "")
-    if _DANGER_RE.search(cmd):
-        return Risk.RISKY, "command contains a potentially destructive operation"
-    return Risk.SAFE, ""
+    return _exec(["bash", "-c", a.command], settings, a.timeout, "shell")
 
 
 # --- run_python ---
@@ -129,17 +128,8 @@ class RunPythonArgs(BaseModel):
 
 
 def _run_python(a: RunPythonArgs, *, settings) -> ToolResult:
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-I", "-c", a.code], cwd=str(settings.workspace_abs),
-            capture_output=True, text=True, timeout=a.timeout,
-        )
-        out = f"exit={proc.returncode}\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
-        return ToolResult(proc.returncode == 0, _clip(out), {"returncode": proc.returncode})
-    except subprocess.TimeoutExpired:
-        return ToolResult(False, f"python timed out after {a.timeout}s")
-    except Exception as e:  # noqa: BLE001
-        return ToolResult(False, f"python error: {e}")
+    # -E -s (not -I): ignore env/user-site but keep the workspace importable.
+    return _exec([sys.executable, "-E", "-s", "-c", a.code], settings, a.timeout, "python")
 
 
 # --- web_search ---
@@ -178,14 +168,16 @@ def _web_fetch(a: WebFetchArgs, *, settings) -> ToolResult:
 
 def builtin_tools() -> list[Tool]:
     return [
-        Tool("read_file", "Read a text file.", ReadFileArgs, _read_file, Risk.SAFE),
+        Tool("read_file", "Read a text file.", ReadFileArgs, _read_file, Risk.SAFE,
+             assess=_assess_path("reads")),
         Tool("write_file", "Write (overwrite) a text file.", WriteFileArgs, _write_file,
-             Risk.SAFE, assess=_assess_write),
-        Tool("list_dir", "List a directory's entries.", ListDirArgs, _list_dir, Risk.SAFE),
+             Risk.SAFE, assess=_assess_path("writes")),
+        Tool("list_dir", "List a directory's entries.", ListDirArgs, _list_dir, Risk.SAFE,
+             assess=_assess_path("lists", ".")),
         Tool("run_shell", "Run a shell command in the workspace.", RunShellArgs, _run_shell,
-             Risk.SAFE, assess=_assess_shell),
-        Tool("run_python", "Run Python code in an isolated subprocess.", RunPythonArgs,
-             _run_python, Risk.SAFE),
+             Risk.RISKY, assess=_assess_exec),
+        Tool("run_python", "Run Python code in a subprocess (cwd = workspace).", RunPythonArgs,
+             _run_python, Risk.RISKY, assess=_assess_exec),
         Tool("web_search", "Search the web.", WebSearchArgs, _web_search, Risk.SAFE),
         Tool("web_fetch", "Fetch a URL and extract readable text.", WebFetchArgs, _web_fetch,
              Risk.SAFE),

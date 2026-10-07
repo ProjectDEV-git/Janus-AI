@@ -19,14 +19,28 @@ in Janus, not in the model:
 - **Kill switch** — `janus stop`, Ctrl+C, or the `.janus_stop` file halt it
   cleanly at the next step.
 - **Budgets** — hard caps on iterations, wall-clock time, and tokens per task.
-- **Approval gate** — destructive or out-of-workspace actions (deleting/overwriting
-  outside the workspace, `rm`/`sudo`-class shell, edits to Janus's own code)
-  pause for your confirmation. Read-only and in-workspace actions run freely.
+- **Sandbox** — shell commands, Python, and benchmark checks run inside a
+  [bubblewrap](https://github.com/containers/bubblewrap) sandbox when it is
+  installed (Linux): the filesystem is read-only except the workspace, your home
+  directory is hidden, and there is no network. Set `sandbox` in `janus.toml`
+  (`auto` / `bwrap` / `off`).
+- **Approval gate** — anything that can reach beyond the workspace pauses for your
+  confirmation: reading, listing or writing files outside the workspace, running
+  shell/Python *without* the sandbox, and every edit to Janus itself (a new tool
+  or a source patch, with the code shown to you). Inside the workspace, and with
+  the sandbox on, actions run freely.
+- **Self-edits are fenced** — a source patch may only touch the one file it was
+  shown (never `tests/`, which judge it), and its tests run in the sandbox.
 - **Audit log** — every thought, tool call, and result is recorded to SQLite and
   a replayable JSONL transcript.
 
 `--trust` widens what runs without a prompt; the kill switch and audit log stay
 on regardless. Use it only when you're watching.
+
+Without bubblewrap (e.g. macOS), code execution is gated, so `janus bench`,
+`janus improve` and the `janus train` A/B step refuse to run model-written code
+unless you pass `--trust`. Install it with `apt install bubblewrap` (or your
+distro's equivalent) to avoid that.
 
 ## Install
 
@@ -46,7 +60,7 @@ janus config
 ```bash
 janus task "write and test a function that reverses a string"  # run a goal
 janus improve      # run a self-improvement cycle against the benchmark
-janus bench        # measure the current benchmark scorecard
+janus bench        # measure the current benchmark scorecard (each task in a fresh workspace)
 janus stop         # halt a running Janus
 janus log          # inspect the audit trail
 janus replay <id>  # replay a past task transcript

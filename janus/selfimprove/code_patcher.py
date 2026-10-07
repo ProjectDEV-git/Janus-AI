@@ -9,12 +9,15 @@ through the approval gate before any of this happens.
 """
 from __future__ import annotations
 
-import subprocess
+import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
-from janus.selfimprove.base import AppliedChange, ImproveContext
-from janus.selfimprove.gittx import PatchTransaction, has_commit
+from janus import sandbox
+from janus.selfimprove.base import AppliedChange, ImproveContext, approve_self_edit
+from janus.selfimprove.gittx import PatchTransaction, has_commit, patch_paths
 
 _PATCH = """You may improve Janus's own source to make it more efficient (fewer tokens,
 fewer steps, less memory) WITHOUT reducing correctness.
@@ -66,30 +69,28 @@ class CodePatcherStrategy:
             ctx.say("[dim]code_patcher: model proposed no change[/]")
             return None
 
-        # Approval gate: self-code edits are always risky.
-        if self.gate is not None:
-            from janus.tools.base import Risk, Tool
-            from pydantic import BaseModel
+        # The patch may only touch the file it was shown. In particular it must not
+        # touch tests/, which are what judge it.
+        touched = patch_paths(root, diff)
+        if touched != {target_rel}:
+            ctx.say(f"[yellow]code_patcher: rejected patch touching {sorted(touched) or 'nothing'} "
+                    f"(only {target_rel} is allowed)[/]")
+            return None
 
-            class _PatchArgs(BaseModel):
-                path: str
-                rationale: str = ""
-
-            sentinel = Tool("self_code_patch", "edit Janus's own source", _PatchArgs,
-                            lambda a, *, settings: None, Risk.RISKY)
-            decision = self.gate.decide(sentinel, {"path": target_rel,
-                                                   "rationale": out.get("rationale", "")})
-            if decision.decision.value != "approved":
-                ctx.say(f"[yellow]code_patcher: blocked by approval gate ({decision.reason})[/]")
-                return None
+        # Approval gate: self-code edits are always risky. Show the approver the diff.
+        approved, reason = approve_self_edit(self.gate, "self_code_patch", {
+            "path": target_rel, "rationale": out.get("rationale", ""), "diff": diff})
+        if not approved:
+            ctx.say(f"[yellow]code_patcher: blocked by approval gate ({reason})[/]")
+            return None
 
         tx = PatchTransaction(root=root)
-        ok, detail = tx.begin_and_apply(diff)
+        ok, detail = tx.begin_and_apply(diff, paths=[target_rel])
         if not ok:
             ctx.say(f"[dim]code_patcher: {detail}[/]")
             return None
 
-        tests_ok, test_detail = _run_tests(root)
+        tests_ok, test_detail = _run_tests(root, ctx.settings)
         if not tests_ok:
             tx.revert()
             ctx.say(f"[yellow]code_patcher: tests failed, reverted ({test_detail})[/]")
@@ -106,12 +107,19 @@ def _pick_target(root: Path) -> str | None:
     return None
 
 
-def _run_tests(root: Path) -> tuple[bool, str]:
+def _run_tests(root: Path, settings) -> tuple[bool, str]:
+    """Run the suite against the patched code, sandboxed when possible: the repo is
+    read-only there, so the patched code can't touch anything but a scratch dir."""
+    scratch = Path(tempfile.mkdtemp(prefix="janus-selftest-"))
     try:
-        proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "--no-header"],
-            cwd=str(root), capture_output=True, text=True, timeout=600,
+        proc = sandbox.run(
+            [sys.executable, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider",
+             "--basetemp", str(scratch / "pytest")],
+            settings=settings, writable=scratch, cwd=root, extra_ro=(root,), timeout=600,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
         return proc.returncode == 0, (proc.stdout or proc.stderr)[-300:]
     except Exception as e:  # noqa: BLE001
         return False, str(e)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)

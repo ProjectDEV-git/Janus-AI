@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     ollama_host: str = "http://localhost:11434"
     temperature: float = 0.7
     num_predict: int = 0
+    seed: int | None = None          # fixed sampling seed (None = random)
 
     # Workspace
     workspace: Path = Field(default=Path("./janus_workspace"))
@@ -32,6 +33,14 @@ class Settings(BaseSettings):
     # Approval policy
     auto_approve_safe: bool = True
     trust: bool = False
+    # Where model-written code runs: "auto" (bubblewrap if usable), "bwrap" (required), "off".
+    sandbox: str = "auto"
+
+    # Benchmark (the fitness gate for self-improvement)
+    bench_temperature: float = 0.0   # deterministic-ish runs so A/B differences are real
+    bench_seed: int = 0
+    bench_repeats: int = 1           # run each task this many times
+    bench_min_gain: float = 0.05     # same success must cut tokens/task by at least this fraction
 
     # Self-training (LoRA on the base Gemma weights)
     base_model_id: str = "google/gemma-3n-E2B"   # full-precision source for training

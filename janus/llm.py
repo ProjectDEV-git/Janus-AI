@@ -37,6 +37,8 @@ class LLM:
         opts: dict = {"temperature": self.settings.temperature}
         if self.settings.num_predict > 0:
             opts["num_predict"] = self.settings.num_predict
+        if self.settings.seed is not None:
+            opts["seed"] = self.settings.seed
         return opts
 
     def chat(

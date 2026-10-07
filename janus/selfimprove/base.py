@@ -34,6 +34,26 @@ class ImproveContext:
             self.console.print(msg)
 
 
+def approve_self_edit(gate, kind: str, args: dict) -> tuple[bool, str]:
+    """Route a self-edit through the approval gate as a RISKY action.
+
+    `args` is what the approver sees, so it should include the actual change
+    (the diff, the module source), not just a summary. No gate means no check
+    was requested (e.g. unit tests)."""
+    if gate is None:
+        return True, "no gate"
+    from pydantic import BaseModel, ConfigDict
+
+    from janus.tools.base import Risk, Tool
+
+    class _Args(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+    sentinel = Tool(kind, "edit Janus itself", _Args, lambda a, *, settings: None, Risk.RISKY)
+    res = gate.decide(sentinel, args)
+    return res.decision.value == "approved", res.reason
+
+
 class Strategy(Protocol):
     name: str
 

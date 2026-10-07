@@ -25,6 +25,20 @@ def has_commit(root: Path) -> bool:
     return _git(root, "rev-parse", "--verify", "HEAD").returncode == 0
 
 
+def patch_paths(root: Path, diff_text: str) -> set[str]:
+    """Files a diff would touch (as git sees them), or an empty set if it doesn't parse."""
+    r = subprocess.run(["git", "apply", "--numstat", "-"], cwd=str(root), input=diff_text,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return set()
+    paths = set()
+    for line in r.stdout.splitlines():
+        parts = line.split("\t", 2)
+        if len(parts) == 3:
+            paths.add(parts[2])
+    return paths
+
+
 def current_branch(root: Path) -> str:
     r = _git(root, "rev-parse", "--abbrev-ref", "HEAD")
     return r.stdout.strip()
@@ -37,12 +51,13 @@ class PatchTransaction:
     tx_branch: str = ""
     committed: bool = False
 
-    def begin_and_apply(self, diff_text: str) -> tuple[bool, str]:
-        """Create a tx branch, apply the diff, commit it. Returns (ok, detail)."""
+    def begin_and_apply(self, diff_text: str, paths: list[str]) -> tuple[bool, str]:
+        """Create a tx branch, apply the diff, commit only `paths`. Returns (ok, detail)."""
         if not has_commit(self.root):
             return False, "repo has no commits; cannot run a self-edit transaction"
         self.orig_branch = current_branch(self.root)
-        if _git(self.root, "diff", "--quiet").returncode != 0:
+        # Staged or unstaged changes to tracked files would be swept into (or lost by) the tx.
+        if _git(self.root, "diff", "--quiet", "HEAD").returncode != 0:
             return False, "working tree is dirty; commit or stash before self-editing"
         self.tx_branch = f"janus/selfedit/{int(time.time())}"
         if _git(self.root, "checkout", "-b", self.tx_branch).returncode != 0:
@@ -56,7 +71,8 @@ class PatchTransaction:
             self._abort()
             return False, f"patch did not apply: {applied.stderr[:300]}"
 
-        _git(self.root, "add", "-A")
+        # Commit only the patched files, never untracked runtime state (workspace, db, ...).
+        _git(self.root, "add", "--", *paths)
         committed = _git(self.root, "commit", "-m", "janus: self-edit candidate")
         if committed.returncode != 0:
             self._abort()

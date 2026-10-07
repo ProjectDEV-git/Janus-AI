@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-from janus.benchmark import measure_subprocess
+from janus.benchmark import measure_subprocess, preflight
 from janus.train import gguf as gguf_mod
 from janus.train.gguf import ollama_create, write_modelfile
 from janus.train import trainer as trainer_mod
@@ -88,11 +88,15 @@ def run_training_cycle(settings, memory, *, adopt: bool = False, console=None) -
         return TrainOutcome("error", f"training/export failed: {e}", tag)
 
     # 6. A/B benchmark: candidate vs current, adopt only on a measurable win.
+    ok, msg = preflight(settings, settings.trust)
+    if not ok:
+        registry.close()
+        return TrainOutcome("built_not_adopted", f"{tag} built but not benchmarked: {msg}", tag)
     say(f"[cyan]A/B[/]: benchmarking {tag} vs current ({parent_tag})")
-    base_card = measure_subprocess(trust=True, model=parent_tag)
-    cand_card = measure_subprocess(trust=True, model=tag)
+    base_card = measure_subprocess(trust=settings.trust, model=parent_tag)
+    cand_card = measure_subprocess(trust=settings.trust, model=tag)
     registry.set_scorecard(tag, cand_card.to_dict())
-    better, why = cand_card.is_better_than(base_card)
+    better, why = cand_card.is_better_than(base_card, settings.bench_min_gain)
 
     if better and adopt:
         registry.adopt(tag)

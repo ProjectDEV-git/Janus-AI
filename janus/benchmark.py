@@ -14,8 +14,12 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import shutil
+import tempfile
+
 import psutil
 
+from janus import sandbox
 from janus.agent import Agent, Reporter, StopController
 from janus.approval import ApprovalGate
 from janus.config import Settings, load_settings
@@ -59,20 +63,27 @@ class Scorecard:
     def total_seconds(self) -> float:
         return sum(t.seconds for t in self.tasks)
 
-    def is_better_than(self, other: "Scorecard | None") -> tuple[bool, str]:
-        """A change is kept only if success does not drop AND cost falls."""
+    @property
+    def tokens_per_task(self) -> float:
+        return self.total_tokens / self.n if self.n else 0.0
+
+    def is_better_than(self, other: "Scorecard | None",
+                       min_gain: float = 0.05) -> tuple[bool, str]:
+        """Keep a change only if success rises, or success holds and tokens/task
+        fall by at least `min_gain`. Wall-clock time is reported but never decides:
+        it moves with machine load, so it would let noise through as "improvement"."""
         if other is None:
             return True, "no baseline"
         if self.success_rate < other.success_rate:
             return False, f"success dropped {other.success_rate:.2f} -> {self.success_rate:.2f}"
-        cheaper_tokens = self.total_tokens < other.total_tokens
-        cheaper_time = self.total_seconds < other.total_seconds
         if self.success_rate > other.success_rate:
             return True, f"success up {other.success_rate:.2f} -> {self.success_rate:.2f}"
-        if cheaper_tokens or cheaper_time:
-            return True, (f"same success, cheaper (tokens {other.total_tokens}->{self.total_tokens}, "
-                          f"time {other.total_seconds:.0f}->{self.total_seconds:.0f}s)")
-        return False, "no improvement in success or cost"
+        cost = (f"tokens/task {other.tokens_per_task:.0f}->{self.tokens_per_task:.0f}, "
+                f"time {other.total_seconds:.0f}->{self.total_seconds:.0f}s")
+        if other.tokens_per_task and \
+                self.tokens_per_task <= other.tokens_per_task * (1 - min_gain):
+            return True, f"same success, cheaper ({cost})"
+        return False, f"no improvement beyond the {min_gain:.0%} margin ({cost})"
 
     def to_dict(self) -> dict:
         return {
@@ -90,49 +101,45 @@ def load_tasks() -> list[dict]:
 
 
 def _check(check: dict, settings: Settings) -> bool:
-    """Run a task's success check. Currently supports type 'file_runs'."""
+    """Run a task's success check (sandboxed when possible). Supports type 'file_runs'."""
     if check.get("type") == "file_runs":
         target = settings.workspace_abs / check["path"]
         if not target.is_file():
             return False
         snippet = check["snippet"]
         try:
-            proc = subprocess.run(
-                [sys.executable, "-I", "-c", snippet],
-                cwd=str(settings.workspace_abs),
-                capture_output=True, text=True, timeout=30,
-            )
+            # -E -s, not -I: -I drops the cwd from sys.path, so the import would always fail.
+            proc = sandbox.run([sys.executable, "-E", "-s", "-c", snippet], settings=settings,
+                               writable=settings.workspace_abs, timeout=30)
             return proc.returncode == 0 and "OK" in proc.stdout
         except Exception:  # noqa: BLE001
             return False
     return False
 
 
-def run_benchmark(trust: bool = True, console=None, settings: Settings | None = None) -> Scorecard:
+def preflight(settings: Settings, trust: bool) -> tuple[bool, str]:
+    """The benchmark runs model-written code. Without a sandbox that is only allowed
+    under explicit trust; otherwise every code step would be blocked and the
+    scorecard would measure nothing."""
+    if trust or sandbox.enabled(settings):
+        return True, "ok"
+    return False, ("the benchmark runs model-written code and no sandbox is available. "
+                   "Install bubblewrap (`bwrap`) to sandbox it, or pass --trust to run it "
+                   "unsandboxed on this machine.")
+
+
+def run_benchmark(trust: bool = False, console=None, settings: Settings | None = None) -> Scorecard:
     s = settings or load_settings()
     s.trust = trust
-    s.workspace_abs.mkdir(parents=True, exist_ok=True)
+    # Sample (near-)deterministically so an A/B difference reflects the change, not luck.
+    s.temperature = s.bench_temperature
+    s.seed = s.bench_seed
     proc = psutil.Process(os.getpid())
 
     scores: list[TaskScore] = []
     for task in load_tasks():
-        # Fresh clients per task so token accounting is per-task.
-        llm = LLM(s)
-        reg = build_registry()
-        mem = Memory(s.db_path)
-        gate = ApprovalGate(s, prompter=None)  # non-interactive; trust decides risky
-        stop = StopController(stopfile=s.stopfile)
-        agent = Agent(s, llm, reg, mem, gate, stop, reporter=Reporter())
-
-        start = time.monotonic()
-        out = agent.run(task["goal"])
-        elapsed = time.monotonic() - start
-        success = _check(task["check"], s)
-        scores.append(TaskScore(task["id"], success, out.tokens, elapsed, out.status))
-        mem.close()
-        if console:
-            mark = "[green]PASS[/]" if success else "[red]FAIL[/]"
-            console.print(f"{mark} {task['id']}: {out.status}, {out.tokens} tok, {elapsed:.1f}s")
+        for _ in range(max(1, s.bench_repeats)):
+            scores.append(_run_task(task, s, console))
 
     card = Scorecard(scores)
     if console:
@@ -142,7 +149,31 @@ def run_benchmark(trust: bool = True, console=None, settings: Settings | None = 
     return card
 
 
-def measure_subprocess(trust: bool = True, model: str | None = None) -> Scorecard:
+def _run_task(task: dict, s: Settings, console=None) -> TaskScore:
+    """Run one task in a fresh, empty workspace so leftovers can't pass its check."""
+    ws = Path(tempfile.mkdtemp(prefix=f"janus-bench-{task['id']}-"))
+    ts = s.model_copy(update={"workspace": ws})
+    # Fresh clients per task so token accounting is per-task.
+    llm = LLM(ts)
+    mem = Memory(ts.db_path)
+    try:
+        gate = ApprovalGate(ts, prompter=None)  # non-interactive; trust decides risky
+        stop = StopController(stopfile=ts.stopfile)
+        agent = Agent(ts, llm, build_registry(), mem, gate, stop, reporter=Reporter())
+        start = time.monotonic()
+        out = agent.run(task["goal"])
+        elapsed = time.monotonic() - start
+        success = _check(task["check"], ts)
+    finally:
+        mem.close()
+        shutil.rmtree(ws, ignore_errors=True)
+    if console:
+        mark = "[green]PASS[/]" if success else "[red]FAIL[/]"
+        console.print(f"{mark} {task['id']}: {out.status}, {out.tokens} tok, {elapsed:.1f}s")
+    return TaskScore(task["id"], success, out.tokens, elapsed, out.status)
+
+
+def measure_subprocess(trust: bool = False, model: str | None = None) -> Scorecard:
     """Run the benchmark in a fresh subprocess and parse its JSON scorecard.
 
     Used by self-improvement so a change to Janus's own source/tools/memory is
@@ -163,7 +194,7 @@ def measure_subprocess(trust: bool = True, model: str | None = None) -> Scorecar
 
 
 if __name__ == "__main__":
-    _trust = "--no-trust" not in sys.argv
+    _trust = "--trust" in sys.argv
     _as_json = "--json" in sys.argv
     _card = run_benchmark(trust=_trust, console=None)
     if _as_json:

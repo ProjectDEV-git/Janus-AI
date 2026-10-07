@@ -145,10 +145,15 @@ def replay(task_id: int = typer.Argument(..., help="Run id to replay.")):
 
 
 @app.command()
-def bench(trust: bool = typer.Option(True, "--trust/--no-trust",
-                                     help="Benchmark runs trusted by default.")):
+def bench(trust: bool = typer.Option(False, "--trust/--no-trust",
+                                     help="Allow risky actions (needed to run code without a sandbox).")):
     """Run the efficiency benchmark and print a scorecard."""
-    from janus.benchmark import run_benchmark
+    from janus.benchmark import preflight, run_benchmark
+    from janus.config import load_settings
+    ok, msg = preflight(load_settings(), trust)
+    if not ok:
+        console.print(f"[red]Cannot benchmark:[/] {msg}")
+        raise typer.Exit(1)
     run_benchmark(trust=trust, console=console)
 
 
@@ -167,6 +172,8 @@ def improve(
 @app.command()
 def train(
     adopt: bool = typer.Option(False, "--adopt", help="Adopt the new model if it wins the A/B."),
+    trust: bool = typer.Option(False, "--trust",
+                               help="Allow the A/B benchmark to run code without a sandbox."),
 ):
     """Train a new Janus model version (LoRA on the base weights) from winning runs."""
     from janus.config import load_settings
@@ -174,6 +181,7 @@ def train(
     from janus.train.pipeline import run_training_cycle
 
     s = load_settings()
+    s.trust = trust
     s.model = _active_model(s)
     ok, msg = LLM(s).ping()
     if not ok:

@@ -1,4 +1,6 @@
 """Agent loop: finish, blocked actions, and the kill switch / budgets."""
+import json
+
 from janus.agent import Agent, StopController
 from janus.approval import ApprovalGate
 from janus.memory import Memory
@@ -65,4 +67,19 @@ def test_unknown_tool_is_handled(settings):
     ])
     out = agent.run("use a nonexistent tool")
     assert out.status == "finished"
+    mem.close()
+
+
+def test_model_sees_its_own_previous_actions(settings):
+    agent, mem, _ = _agent(settings, [
+        {"thought": "look around", "action": {"tool": "list_dir", "args": {"path": "."}}},
+        {"thought": "done", "finish": {"done": True, "evidence": "listed"}},
+    ])
+    agent.run("list the workspace")
+    second_call = agent.llm.seen[1]
+    assistant = [m for m in second_call if m["role"] == "assistant"]
+    assert len(assistant) == 1
+    assert json.loads(assistant[0]["content"])["action"]["tool"] == "list_dir"
+    # The observation follows the action it belongs to.
+    assert second_call[-1]["role"] == "user" and "OBSERVATION" in second_call[-1]["content"]
     mem.close()

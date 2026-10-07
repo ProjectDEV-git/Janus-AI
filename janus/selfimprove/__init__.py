@@ -8,7 +8,7 @@ only if the new scorecard beats the baseline, otherwise reverted.
 from __future__ import annotations
 
 from janus.approval import ApprovalGate
-from janus.benchmark import measure_subprocess
+from janus.benchmark import measure_subprocess, preflight
 from janus.config import load_settings
 from janus.llm import LLM
 from janus.memory import Memory
@@ -41,21 +41,30 @@ def run_improve(rounds: int = 1, trust: bool = False, train: bool = False,
         from rich.prompt import Confirm
 
         def prompter(tool_name, args, reason):  # noqa: ANN001
-            console.print(f"[yellow]Self-edit approval[/] {tool_name}: {reason}\nargs={args}")
+            console.print(f"[yellow]Self-edit approval[/] {tool_name}: {reason}")
+            for key, val in args.items():
+                console.print(f"[bold]{key}[/]:")
+                console.print(str(val), markup=False, highlight=False)
             return Confirm.ask("Allow this self-edit?", default=False)
 
     gate = ApprovalGate(s, prompter=prompter)
 
+    ok, msg = preflight(s, trust)
+    if not ok:
+        if console:
+            console.print(f"[red]Cannot improve:[/] {msg}")
+        return
+
     strategies = [
         PromptMemoryStrategy(),
-        ToolWriterStrategy(),
+        ToolWriterStrategy(gate=gate),
         CodePatcherStrategy(gate=gate),
         FineTuneStrategy(),
     ]
 
     if console:
         console.print("[bold]Measuring baseline...[/]")
-    baseline = measure_subprocess(trust=True)
+    baseline = measure_subprocess(trust=trust)
     if console:
         console.print(f"baseline: {baseline.success_rate:.0%} success, "
                       f"{baseline.total_tokens} tokens, {baseline.total_seconds:.0f}s")
@@ -71,8 +80,8 @@ def run_improve(rounds: int = 1, trust: bool = False, train: bool = False,
                 continue
             if console:
                 console.print(f"[bold]Testing[/] {strat.name}: {change.description}")
-            candidate = measure_subprocess(trust=True)
-            better, why = candidate.is_better_than(baseline)
+            candidate = measure_subprocess(trust=trust)
+            better, why = candidate.is_better_than(baseline, s.bench_min_gain)
             if better:
                 change.keep()
                 baseline = candidate
