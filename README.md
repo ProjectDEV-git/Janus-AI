@@ -92,6 +92,30 @@ janus improve --train --adopt   # self-improve AND self-train in one cycle
   adoption is a gated/opt-in action. Old versions stay in the lineage so you can
   always roll back with `janus model use`.
 
+### No GPU? Train on Google Colab (free T4)
+
+You don't need a local GPU. Janus builds the training dataset locally, you train
+on a free Colab T4, and import the finished model back:
+
+```bash
+# 1. On your machine: mine your winning runs into a dataset
+janus dataset                  # writes datasets/sft.jsonl
+
+# 2. In Colab: open notebooks/janus_train_colab.ipynb, set Runtime -> T4 GPU,
+#    upload sft.jsonl, run all cells. It LoRA-trains and exports a GGUF zip.
+
+# 3. Back on your machine: import the downloaded model into the lineage
+unzip janus_model.zip -d janus_model
+janus model import janus_model/*.gguf --adopt
+janus model list
+```
+
+`janus model import` writes the Ollama Modelfile, runs `ollama create`, records
+the version in the lineage, and (with `--adopt`) activates it. Skip `--adopt` to
+A/B it first (`janus bench` per tag, then `janus model use janus:vN`). The Colab
+notebook uses [Unsloth](https://github.com/unslothai/unsloth), which fits Gemma
+LoRA on a free T4 and exports GGUF directly — no local llama.cpp needed.
+
 ## Configuration
 
 Edit `janus.toml` (model, workspace root, budgets, approval policy) or override
@@ -104,6 +128,7 @@ janus/            package: config, llm, memory, agent, approval, tools, selfimpr
   tools/dynamic/  tools Janus writes for itself
   selfimprove/    the four self-improvement strategies
   train/          self-training: dataset mining, LoRA trainer, GGUF export, lineage
+notebooks/        janus_train_colab.ipynb — train on a free Colab GPU
 tests/            pytest suite (approval gate, budgets, revert-on-failure)
 benchmark/tasks/  the efficiency benchmark suite
 ```

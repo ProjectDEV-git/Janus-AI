@@ -187,6 +187,25 @@ def train(
                         title=f"train {outcome.tag or ''}", border_style=color))
 
 
+@app.command()
+def dataset():
+    """Build the training dataset from winning runs (for training on Colab/elsewhere)."""
+    from janus.config import load_settings
+    from janus.memory import Memory
+    from janus.train.dataset import build_dataset
+
+    s = load_settings()
+    mem = Memory(s.db_path)
+    stats = build_dataset(mem, s)
+    mem.close()
+    console.print(Panel(
+        f"examples: [bold]{stats.examples}[/] (from {stats.runs_used} runs, "
+        f"{stats.assistant_turns} assistant turns)\npath: {stats.path}\n\n"
+        f"Upload this file to the Colab notebook (notebooks/janus_train_colab.ipynb) "
+        f"to train without a local GPU.",
+        title="dataset", border_style="cyan"))
+
+
 model_app = typer.Typer(help="Inspect and switch Janus model versions.")
 app.add_typer(model_app, name="model")
 
@@ -222,6 +241,25 @@ def model_use(tag: str = typer.Argument(..., help="Model tag to adopt, e.g. janu
     reg.adopt(tag)
     reg.close()
     console.print(f"[green]Active model set to[/] {tag}")
+
+
+@model_app.command("import")
+def model_import(
+    gguf: str = typer.Argument(..., help="Path to a .gguf trained elsewhere (e.g. from Colab)."),
+    adopt: bool = typer.Option(False, "--adopt", help="Adopt it as the active model."),
+    parent: str = typer.Option(None, "--parent", help="Parent tag for the lineage."),
+):
+    """Register a GGUF trained on Colab (or any machine) into the lineage + Ollama."""
+    from janus.config import load_settings
+    from janus.train.pipeline import register_external_gguf
+
+    s = load_settings()
+    outcome = register_external_gguf(s, gguf_path=gguf, adopt=adopt, parent_tag=parent,
+                                     console=console)
+    color = {"adopted": "green", "built_not_adopted": "cyan", "error": "red"}.get(
+        outcome.status, "white")
+    console.print(Panel(f"status: [bold]{outcome.status}[/]\n{outcome.detail}",
+                        title=f"import {outcome.tag or ''}", border_style=color))
 
 
 if __name__ == "__main__":

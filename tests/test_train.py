@@ -87,3 +87,44 @@ def test_pipeline_dataset_only_without_gpu(settings):
     assert outcome.status == "dataset_only"
     assert "dataset ready" in outcome.detail
     mem.close()
+
+
+def test_register_external_gguf_adopts_with_injected_create(settings, tmp_path):
+    from janus.train.pipeline import register_external_gguf
+    from janus.train.registry import ModelRegistry
+
+    gguf = tmp_path / "janus-v1.Q4_K_M.gguf"
+    gguf.write_bytes(b"\x00gguf")
+    calls = []
+
+    def fake_create(tag, modelfile):
+        calls.append((tag, modelfile))
+        return True, "created"
+
+    outcome = register_external_gguf(settings, gguf_path=str(gguf), adopt=True,
+                                     create=fake_create)
+    assert outcome.status == "adopted"
+    assert outcome.tag == "janus:v1"
+    assert calls and calls[0][0] == "janus:v1"
+    assert calls[0][1].exists()  # a Modelfile was written next to the gguf
+
+    reg = ModelRegistry(settings.db_path)
+    assert reg.current_tag(default="base") == "janus:v1"
+    reg.close()
+
+
+def test_register_external_gguf_missing_file(settings):
+    from janus.train.pipeline import register_external_gguf
+    outcome = register_external_gguf(settings, gguf_path="/no/such/file.gguf",
+                                     create=lambda *a: (True, "x"))
+    assert outcome.status == "error"
+
+
+def test_register_external_gguf_handles_ollama_failure(settings, tmp_path):
+    from janus.train.pipeline import register_external_gguf
+    gguf = tmp_path / "m.gguf"
+    gguf.write_bytes(b"\x00")
+    outcome = register_external_gguf(settings, gguf_path=str(gguf),
+                                     create=lambda *a: (False, "ollama missing"))
+    assert outcome.status == "error"
+    assert "ollama" in outcome.detail

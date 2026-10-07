@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from janus.benchmark import measure_subprocess
 from janus.train import gguf as gguf_mod
+from janus.train.gguf import ollama_create, write_modelfile
 from janus.train import trainer as trainer_mod
 from janus.train.dataset import build_dataset
 from janus.train.registry import ModelRegistry
@@ -107,3 +108,46 @@ def run_training_cycle(settings, memory, *, adopt: bool = False, console=None) -
     registry.close()
     return TrainOutcome("built_not_adopted", f"{tag} did not beat current ({why}); kept on record.",
                         tag)
+
+
+def register_external_gguf(settings, *, gguf_path, adopt=False, parent_tag=None,
+                           console=None, create=ollama_create) -> TrainOutcome:
+    """Register a GGUF trained elsewhere (e.g. Google Colab) into the lineage.
+
+    Writes a Modelfile, creates the Ollama tag, records the version, and
+    optionally adopts it. `create` is injectable for testing. This closes the
+    no-local-GPU loop: train on Colab, download the GGUF, import it here.
+    """
+    def say(msg: str) -> None:
+        if console is not None:
+            console.print(msg)
+
+    gguf_path = __import__("pathlib").Path(gguf_path)
+    if not gguf_path.is_file():
+        return TrainOutcome("error", f"GGUF not found: {gguf_path}")
+
+    registry = ModelRegistry(settings.db_path)
+    version = registry.next_version()
+    tag = f"{settings.model_prefix}:v{version}"
+    parent = parent_tag or registry.current_tag(default=settings.model)
+
+    modelfile = write_modelfile(gguf_path, tag, settings, parent)
+    ok, detail = create(tag, modelfile)
+    if not ok:
+        registry.register(version=version, tag=tag, parent_tag=parent,
+                          base_model=settings.base_model_id, dataset_hash="(external)",
+                          adapter_dir="(external)", status="export_failed")
+        registry.close()
+        return TrainOutcome("error", f"ollama create failed: {detail}", tag)
+
+    registry.register(version=version, tag=tag, parent_tag=parent,
+                      base_model=settings.base_model_id, dataset_hash="(external)",
+                      adapter_dir="(external)", status="built")
+    say(f"[cyan]import[/]: registered {tag} (from {gguf_path.name})")
+    if adopt:
+        registry.adopt(tag)
+        registry.close()
+        return TrainOutcome("adopted", f"{tag} imported and adopted as the active model.", tag)
+    registry.close()
+    return TrainOutcome("built_not_adopted",
+                        f"{tag} imported; run `janus model use {tag}` to activate it.", tag)
