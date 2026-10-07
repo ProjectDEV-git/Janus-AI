@@ -1,0 +1,23 @@
+# Janus configuration. Env vars (JANUS_*) override these.
+
+# --- Model ---
+model = "hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M"
+ollama_host = "http://localhost:11434"
+temperature = 0.7
+# Max tokens the model may generate per call (0 = model default).
+num_predict = 0
+
+# --- Workspace ---
+# Default root for file operations. Paths outside this are "risky" and gated.
+workspace = "./janus_workspace"
+
+# --- Budgets (hard caps per task; hitting one pauses and reports) ---
+max_iterations = 40
+max_seconds = 1800
+max_tokens = 200000
+
+# --- Approval policy ---
+# auto_approve_safe: run read-only / in-workspace actions without asking.
+auto_approve_safe = true
+# trust: when true, risky actions also run without a prompt (kill switch + audit log stay on).
+trust = false

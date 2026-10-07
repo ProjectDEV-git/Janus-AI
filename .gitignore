@@ -1,0 +1,29 @@
+# Janus runtime artifacts
+janus_workspace/
+*.sqlite
+*.sqlite-*
+logs/
+transcripts/
+.janus_stop
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# LoRA adapters / datasets (large)
+adapters/
+datasets/

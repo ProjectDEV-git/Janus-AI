@@ -1,0 +1,32 @@
+[
+  {
+    "id": "reverse_string",
+    "goal": "Create a file reverse.py in the workspace with a function reverse(s) that returns the reversed string, then verify reverse('abc') == 'cba' by running it.",
+    "check": {"type": "file_runs", "path": "reverse.py", "snippet": "from reverse import reverse\nassert reverse('abc') == 'cba'\nassert reverse('') == ''\nprint('OK')"}
+  },
+  {
+    "id": "fizzbuzz",
+    "goal": "Create fizzbuzz.py in the workspace with fizzbuzz(n) returning 'Fizz','Buzz','FizzBuzz', or str(n) per the classic rules. Verify it runs.",
+    "check": {"type": "file_runs", "path": "fizzbuzz.py", "snippet": "from fizzbuzz import fizzbuzz\nassert fizzbuzz(3)=='Fizz'\nassert fizzbuzz(5)=='Buzz'\nassert fizzbuzz(15)=='FizzBuzz'\nassert fizzbuzz(7)=='7'\nprint('OK')"}
+  },
+  {
+    "id": "sum_file",
+    "goal": "Create numbers.txt in the workspace containing the numbers 1 through 10 one per line, then create sum_numbers.py with total() that reads numbers.txt and returns their integer sum. Verify total() == 55.",
+    "check": {"type": "file_runs", "path": "sum_numbers.py", "snippet": "from sum_numbers import total\nassert total() == 55\nprint('OK')"}
+  },
+  {
+    "id": "is_prime",
+    "goal": "Create primes.py with is_prime(n) returning True for primes and False otherwise. Verify the first primes are detected correctly.",
+    "check": {"type": "file_runs", "path": "primes.py", "snippet": "from primes import is_prime\nassert [n for n in range(2,20) if is_prime(n)] == [2,3,5,7,11,13,17,19]\nassert not is_prime(1)\nprint('OK')"}
+  },
+  {
+    "id": "word_count",
+    "goal": "Create wc.py with count_words(text) that returns the number of whitespace-separated words. Verify count_words('a b  c') == 3 and count_words('') == 0.",
+    "check": {"type": "file_runs", "path": "wc.py", "snippet": "from wc import count_words\nassert count_words('a b  c')==3\nassert count_words('')==0\nprint('OK')"}
+  },
+  {
+    "id": "json_roundtrip",
+    "goal": "Create jr.py with save(d, path) and load(path) that write a dict to JSON and read it back. Verify a roundtrip of {'a':1,'b':[2,3]} is preserved.",
+    "check": {"type": "file_runs", "path": "jr.py", "snippet": "import os, tempfile\nfrom jr import save, load\np=os.path.join(tempfile.gettempdir(),'jr_test.json')\nsave({'a':1,'b':[2,3]}, p)\nassert load(p)=={'a':1,'b':[2,3]}\nprint('OK')"}
+  }
+]
