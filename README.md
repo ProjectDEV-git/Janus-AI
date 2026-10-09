@@ -21,11 +21,11 @@ in Janus, not in the model:
 - **Kill switch** — `janus stop`, Ctrl+C, or the `.janus_stop` file halt it
   cleanly at the next step.
 - **Budgets** — hard caps on iterations, wall-clock time, and tokens per task.
-- **Sandbox** — shell commands, Python, and benchmark checks run inside a
-  [bubblewrap](https://github.com/containers/bubblewrap) sandbox when it is
-  installed (Linux): the filesystem is read-only except the workspace, your home
-  directory is hidden, and there is no network. Set `sandbox` in `janus.toml`
-  (`auto` / `bwrap` / `off`).
+- **Sandbox** — shell commands, Python, and benchmark checks run inside the OS
+  sandbox: [bubblewrap](https://github.com/containers/bubblewrap) on Linux,
+  Seatbelt (`sandbox-exec`, built in) on macOS. The filesystem is read-only
+  except the workspace, your home directory is hidden, and there is no network. Set `sandbox` in `janus.toml`
+  (`auto` / `on` / `bwrap` / `seatbelt` / `off`).
 - **Approval gate** — anything that can reach beyond the workspace pauses for your
   confirmation: reading, listing or writing files outside the workspace, running
   shell/Python *without* the sandbox, and every edit to Janus itself (a new tool
@@ -39,10 +39,12 @@ in Janus, not in the model:
 `--trust` widens what runs without a prompt; the kill switch and audit log stay
 on regardless. Use it only when you're watching.
 
-Without bubblewrap (e.g. macOS), code execution is gated, so `janus bench`,
-`janus improve` and the `janus train` A/B step refuse to run model-written code
-unless you pass `--trust`. Install it with `apt install bubblewrap` (or your
-distro's equivalent) to avoid that.
+Janus runs on Linux, macOS and Windows. Windows has no sandbox backend
+(`run_shell` uses bash if found, e.g. Git Bash, else PowerShell). Without a
+sandbox (Windows, or Linux without bubblewrap), code execution is gated, so
+`janus bench`, `janus improve` and the `janus train` A/B step refuse to run
+model-written code unless you pass `--trust`. On Linux, install bubblewrap
+(`apt install bubblewrap` or your distro's equivalent) to avoid that.
 
 ## Install
 

@@ -34,9 +34,10 @@ auto_approve_safe = true
 # trust: when true, risky actions also run without a prompt (kill switch + audit log stay on).
 trust = false
 # Where model-written code (shell, python, benchmark checks) runs:
-#   "auto"  - inside a bubblewrap sandbox when available (read-only filesystem except the
-#             workspace, home hidden, no network); otherwise code execution needs approval
-#   "bwrap" - always sandbox; refuse to run code if bubblewrap is missing
+#   "auto"  - inside the OS sandbox when available: bubblewrap on Linux, Seatbelt on macOS
+#             (read-only filesystem except the workspace, home hidden, no network); otherwise code execution needs approval
+#   "on"    - always sandbox; refuse to run code if no sandbox is usable
+#   "bwrap" / "seatbelt" - require that specific backend
 #   "off"   - never sandbox (code execution then needs approval unless trust = true)
 sandbox = "auto"
 

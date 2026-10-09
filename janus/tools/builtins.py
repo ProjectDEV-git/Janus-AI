@@ -8,6 +8,8 @@ the OS sandbox (see janus.sandbox) and RISKY otherwise.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -81,7 +83,7 @@ def _assess_path(verb: str, default: str = ""):
 def _assess_exec(args: dict, settings):
     if sandbox.enabled(settings):
         return Risk.SAFE, "runs in sandbox"
-    return Risk.RISKY, "runs code without a sandbox (install bubblewrap to sandbox it)"
+    return Risk.RISKY, f"runs code without a sandbox ({sandbox.install_hint()})"
 
 
 def _exec(cmd: list[str], settings, timeout: int, label: str) -> ToolResult:
@@ -113,12 +115,23 @@ def _list_dir(a: ListDirArgs, *, settings) -> ToolResult:
 
 # --- run_shell ---
 class RunShellArgs(BaseModel):
-    command: str = Field(description="Shell command to run (bash -c).")
+    command: str = Field(description="Shell command to run (bash -c; on Windows without "
+                                     "bash, PowerShell).")
     timeout: int = Field(default=120, description="Timeout in seconds.")
 
 
 def _run_shell(a: RunShellArgs, *, settings) -> ToolResult:
-    return _exec(["bash", "-c", a.command], settings, a.timeout, "shell")
+    return _exec(_shell_argv(a.command), settings, a.timeout, "shell")
+
+
+def _shell_argv(command: str) -> list[str]:
+    """bash everywhere it exists (incl. Git Bash/WSL on Windows), else PowerShell/cmd."""
+    if os.name != "nt" or shutil.which("bash"):
+        return ["bash", "-c", command]
+    for ps in ("pwsh", "powershell"):
+        if shutil.which(ps):
+            return [ps, "-NoProfile", "-NonInteractive", "-Command", command]
+    return ["cmd", "/c", command]
 
 
 # --- run_python ---
