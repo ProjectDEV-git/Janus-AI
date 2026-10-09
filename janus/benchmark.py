@@ -124,7 +124,7 @@ def preflight(settings: Settings, trust: bool) -> tuple[bool, str]:
     if trust or sandbox.enabled(settings):
         return True, "ok"
     return False, ("the benchmark runs model-written code and no sandbox is available. "
-                   "Install bubblewrap (`bwrap`) to sandbox it, or pass --trust to run it "
+                   f"To sandbox it, {sandbox.install_hint()}; or pass --trust to run it "
                    "unsandboxed on this machine.")
 
 
